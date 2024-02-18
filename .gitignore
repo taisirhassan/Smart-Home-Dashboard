@@ -1,0 +1,6 @@
+simulator/.env
+simulator/AmazonRootCA1.pem
+simulator/22a7be11f5e1fe4290e2e47f2ad6dfd6eb1381e40baa367883a203bb90147b53-certificate.pem.crt
+simulator/22a7be11f5e1fe4290e2e47f2ad6dfd6eb1381e40baa367883a203bb90147b53-private.pem.key
+simulator/22a7be11f5e1fe4290e2e47f2ad6dfd6eb1381e40baa367883a203bb90147b53-public.pem.key
+.DS_Store

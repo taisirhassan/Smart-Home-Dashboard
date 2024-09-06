@@ -1,76 +1,119 @@
 import time
 import json
-import os
-import ssl
-from dotenv import load_dotenv
-import paho.mqtt.client as mqtt
 import random
+import os
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from awscrt import mqtt, io
+from awsiot import mqtt_connection_builder
+from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
-# MQTT Broker settings
-broker = os.getenv('AWS_IOT_ENDPOINT')  # Your AWS IoT Core endpoint
-port = 8883  # Default MQTT over TLS/SSL port
-topic = "home/sensors/temperature"  # Topic to publish to
-client_id = f'python-mqtt-{random.randint(0, 1000)}' # Create a random client ID
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-# Paths to your certificates and private key from environment variables
-ca_path = os.getenv('AWS_IOT_CA_PATH') # Replace with your CA certificate
-cert_path = os.getenv('AWS_IOT_CERT_PATH') # Replace with your device certificate
-key_path = os.getenv('AWS_IOT_PRIVATE_KEY_PATH') # Replace with your device private key
+class IoTDevice:
+    def __init__(self, device_id, device_type, mqtt_connection):
+        self.device_id = device_id
+        self.device_type = device_type
+        self.mqtt_connection = mqtt_connection
 
+    def generate_telemetry(self):
+        if self.device_type == "thermostat":
+            return {
+                "temperature": round(random.uniform(18.0, 26.0), 1),
+                "humidity": round(random.uniform(30.0, 60.0), 1),
+                "set_point": round(random.uniform(20.0, 24.0), 1)
+            }
+        elif self.device_type == "light":
+            return {
+                "status": random.choice(["ON", "OFF"]),
+                "brightness": random.randint(0, 100)
+            }
+        elif self.device_type == "security_camera":
+            return {
+                "status": random.choice(["ACTIVE", "STANDBY"]),
+                "motion_detected": random.choice([True, False])
+            }
 
-# Callback function for when a message is received
-def on_message(client, userdata, message):
-    print(f"Received message '{message.payload.decode()}' on topic '{message.topic}'")
+    def publish_telemetry(self):
+        while True:
+            telemetry = self.generate_telemetry()
+            message = {
+                "device_id": self.device_id,
+                "device_type": self.device_type,
+                "timestamp": int(time.time()),
+                "data": telemetry
+            }
+            topic = f"devices/{self.device_type}/{self.device_id}/telemetry"
+            self.mqtt_connection.publish(
+                topic=topic,
+                payload=json.dumps(message),
+                qos=mqtt.QoS.AT_LEAST_ONCE
+            )
+            print(f"Published: {message}")
+            time.sleep(random.uniform(5, 15))  # Simulate random intervals
 
-# Callback function for when the client is connected
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print("Connected to MQTT Broker!")
-        client.subscribe(topic)  # Subscribe to the topic after connecting
-    else:
-        print("Failed to connect, return code %d\n", rc)
+def create_and_run_device(device_config, mqtt_connection):
+    device = IoTDevice(**device_config, mqtt_connection=mqtt_connection)
+    device.publish_telemetry()
 
-# Connect to the MQTT broker
-def connect_mqtt():
-    client = mqtt.Client(client_id)
-    client.tls_set(
-        ca_certs=os.getenv("AWS_IOT_CA_PATH"),
-        certfile=os.getenv("AWS_IOT_CERT_PATH"),
-        keyfile=os.getenv("AWS_IOT_PRIVATE_KEY_PATH"),
-        tls_version=ssl.PROTOCOL_TLSv1_2
+if __name__ == "__main__":
+    # AWS IoT Core configuration
+    endpoint = os.environ.get('IOT_ENDPOINT')
+    cert_filepath = os.environ.get('CERTIFICATE_PATH')
+    pri_key_filepath = os.environ.get('PRIVATE_KEY_PATH')
+    ca_filepath = os.environ.get('ROOT_CA_PATH')
+
+    if not all([endpoint, cert_filepath, pri_key_filepath, ca_filepath]):
+        raise ValueError("Missing required environment variables. Please set IOT_ENDPOINT, CERTIFICATE_PATH, PRIVATE_KEY_PATH, and ROOT_CA_PATH.")
+
+    logger.info(f"Endpoint: {endpoint}")
+    logger.info(f"Certificate Path: {cert_filepath}")
+    logger.info(f"Private Key Path: {pri_key_filepath}")
+    logger.info(f"CA Path: {ca_filepath}")
+
+    # Create a default event loop group
+    event_loop_group = io.EventLoopGroup(1)
+    host_resolver = io.DefaultHostResolver(event_loop_group)
+    client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
+
+    # Create a single MQTT connection
+    mqtt_connection = mqtt_connection_builder.mtls_from_path(
+        endpoint=endpoint,
+        cert_filepath=cert_filepath,
+        pri_key_filepath=pri_key_filepath,
+        ca_filepath=ca_filepath,
+        client_bootstrap=client_bootstrap,
+        client_id="iot_simulator",
+        clean_session=False,
+        keep_alive_secs=30,
+        on_connection_interrupted=lambda connection, error, **kwargs: logger.error(f"Connection interrupted. error: {error}"),
+        on_connection_resumed=lambda connection, return_code, session_present, **kwargs: logger.info("Connection resumed. return_code: {} session_present: {}".format(return_code, session_present)),
     )
-    client.on_connect = on_connect
-    client.on_message = on_message  # Set the callback function for when a message is received
-    client.connect(broker, port)
-    return client
 
-def publish(client):
-    while True:
-        # Simulate temperature
-        temperature = random.randint(20, 30)
-        temp_message = json.dumps({"temperature": temperature, "unit": "Celsius"})
-        client.publish("home/sensors/temperature", temp_message)
-        
-        # Simulate humidity
-        humidity = random.randint(30, 60)
-        humidity_message = json.dumps({"humidity": humidity, "unit": "%"})
-        client.publish("home/sensors/humidity", humidity_message)
-        
-        # Simulate light
-        light = random.choice(['On', 'Off'])
-        light_message = json.dumps({"light": light})
-        client.publish("home/sensors/light", light_message)
+    logger.info(f"Connecting to {endpoint}...")
+    connect_future = mqtt_connection.connect()
+    
+    try:
+        connect_result = connect_future.result(timeout=10)  # Wait for 10 seconds
+        logger.info(f"Connected with result: {connect_result}")
+    except Exception as e:
+        logger.error(f"Connection failed: {str(e)}")
+        raise
 
-        print(f"Published temperature: {temp_message}, humidity: {humidity_message}, light: {light_message}")
-        
-        time.sleep(5)  # Adjust sleep time as needed
+    logger.info("Connected!")
 
-def run():
-    client = connect_mqtt()
-    client.loop_start()
-    publish(client)
+    # Device configurations
+    devices = [
+        {"device_id": "thermostat1", "device_type": "thermostat"},
+        {"device_id": "light1", "device_type": "light"},
+        {"device_id": "camera1", "device_type": "security_camera"}
+    ]
 
-if __name__ == '__main__':
-    run()
+    # Run devices in parallel
+    with ThreadPoolExecutor(max_workers=len(devices)) as executor:
+        executor.map(lambda config: create_and_run_device(config, mqtt_connection), devices)

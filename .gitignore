@@ -1,6 +1,34 @@
-simulator/.env
-simulator/AmazonRootCA1.pem
-simulator/22a7be11f5e1fe4290e2e47f2ad6dfd6eb1381e40baa367883a203bb90147b53-certificate.pem.crt
-simulator/22a7be11f5e1fe4290e2e47f2ad6dfd6eb1381e40baa367883a203bb90147b53-private.pem.key
-simulator/22a7be11f5e1fe4290e2e47f2ad6dfd6eb1381e40baa367883a203bb90147b53-public.pem.key
+# Environment variables
+.env
+
+# Certificates
+*.pem
+*.crt
+*.key
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+
+# OS generated files
 .DS_Store
+Thumbs.db
+
+# IDE specific files
+.vscode/
+.idea/
+
+# Compiled Python files
+*.pyc
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/

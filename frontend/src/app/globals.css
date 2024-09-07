@@ -1,0 +1,28 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Custom styles */
+body {
+  @apply bg-gray-100 text-gray-900;
+}
+
+.nav-link {
+  @apply flex items-center px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-700 transition duration-150 ease-in-out;
+}
+
+.dashboard-card {
+  @apply bg-white rounded-lg shadow-md p-6;
+}
+
+.dashboard-title {
+  @apply text-2xl font-bold text-gray-900 mb-4;
+}
+
+.dashboard-subtitle {
+  @apply text-xl font-semibold text-gray-700 mb-2;
+}
+
+.dashboard-text {
+  @apply text-gray-600;
+}

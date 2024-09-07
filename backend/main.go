@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/rs/cors"
 )
 
 type DeviceData struct {
@@ -66,20 +67,73 @@ func main() {
 	}
 
 	r := mux.NewRouter()
-	r.HandleFunc("/iot-data", handleIoTData).Methods("POST")
-	r.HandleFunc("/iot-data/{deviceId}", getDeviceData).Methods("GET")
+	r.HandleFunc("/iot-data", handleIoTData).Methods("GET", "POST")
+
+	// Create a new CORS handler
+	c := cors.New(cors.Options{
+		AllowedOrigins: []string{"http://localhost:3000"}, // Allow requests from your Next.js app
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type", "Authorization"},
+	})
+
+	// Wrap your router with the CORS handler
+	handler := c.Handler(r)
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	log.Printf("Server starting on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, r))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
 
 func handleIoTData(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received request on /iot-data. Method: %s, Content-Type: %s", r.Method, r.Header.Get("Content-Type"))
 
+	switch r.Method {
+	case "GET":
+		handleGetIoTData(w, r)
+	case "POST":
+		handlePostIoTData(w, r)
+	}
+}
+
+func handleGetIoTData(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	// Get all keys from Redis
+	keys, err := redisClient.Keys(ctx, "*").Result()
+	if err != nil {
+		log.Printf("Error getting keys from Redis: %v", err)
+		http.Error(w, "Error retrieving device data", http.StatusInternalServerError)
+		return
+	}
+
+	var allDeviceData []DeviceData
+
+	// Fetch data for each key
+	for _, key := range keys {
+		val, err := redisClient.Get(ctx, key).Result()
+		if err != nil {
+			log.Printf("Error getting data for key %s from Redis: %v", key, err)
+			continue
+		}
+
+		var deviceData DeviceData
+		err = json.Unmarshal([]byte(val), &deviceData)
+		if err != nil {
+			log.Printf("Error unmarshaling data for key %s: %v", key, err)
+			continue
+		}
+
+		allDeviceData = append(allDeviceData, deviceData)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(allDeviceData)
+}
+
+func handlePostIoTData(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Error reading request body: %v", err)
@@ -127,57 +181,4 @@ func handleIoTData(w http.ResponseWriter, r *http.Request) {
 	log.Println("Data processed, inserted into database, and cached in Redis successfully")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Data received, stored, and cached"})
-}
-
-func getDeviceData(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	deviceID := vars["deviceId"]
-
-	ctx := context.Background()
-
-	// Try to get data from Redis cache first
-	cachedData, err := redisClient.Get(ctx, deviceID).Result()
-	if err == nil {
-		// Data found in cache
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(cachedData))
-		return
-	}
-
-	// If not in cache, query the database
-	var data []byte
-	var timestamp int64
-	err = db.QueryRow("SELECT data, timestamp FROM device_data WHERE device_id = $1 ORDER BY timestamp DESC LIMIT 1", deviceID).Scan(&data, &timestamp)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "Device not found", http.StatusNotFound)
-		} else {
-			log.Printf("Error querying database: %v", err)
-			http.Error(w, "Error retrieving device data", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	// Construct the response
-	response := DeviceData{
-		DeviceID:  deviceID,
-		Timestamp: timestamp,
-	}
-	err = json.Unmarshal(data, &response.Data)
-	if err != nil {
-		log.Printf("Error unmarshaling JSON from database: %v", err)
-		http.Error(w, "Error processing device data", http.StatusInternalServerError)
-		return
-	}
-
-	// Cache the data in Redis for future requests
-	jsonResponse, _ := json.Marshal(response)
-	err = redisClient.Set(ctx, deviceID, jsonResponse, 1*time.Hour).Err()
-	if err != nil {
-		log.Printf("Error caching data in Redis: %v", err)
-		// Continue execution even if Redis caching fails
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
 }

@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: xray-daemon
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: xray-daemon
+  template:
+    metadata:
+      labels:
+        app: xray-daemon
+    spec:
+      containers:
+      - name: xray-daemon
+        image: amazon/aws-xray-daemon
+        ports:
+        - containerPort: 2000
+          protocol: UDP
+        resources:
+          limits:
+            memory: 256Mi
+            cpu: 256m
+          requests:
+            memory: 32Mi
+            cpu: 50m
+        env:
+        - name: AWS_REGION
+          value: "us-east-1"  # Replace with your AWS region
+      serviceAccountName: xray-daemon
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xray-service
+  namespace: default
+spec:
+  selector:
+    app: xray-daemon
+  clusterIP: None
+  ports:
+  - port: 2000
+    protocol: UDP

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cloudwatch-logs-sa
+  namespace: default
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::${AWS_ACCOUNT_ID}:role/eks-cloudwatch-logs-role
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: xray-daemon
+  namespace: default
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::${AWS_ACCOUNT_ID}:role/eks-xray-role
